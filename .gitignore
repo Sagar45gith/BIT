@@ -1,0 +1,11 @@
+# Python junk
+backend/venv/
+backend/__pycache__/
+*.pyc
+
+# Node junk
+frontend/node_modules/
+frontend/dist/
+
+# System junk
+.DS_Store
