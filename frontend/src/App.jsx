@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, memo } from 'react';
 import io from 'socket.io-client';
+import { motion, AnimatePresence, useSpring } from 'framer-motion';
 import {
   Activity,
   Wifi,
@@ -13,42 +14,43 @@ import {
   Clock,
   Sparkles,
   X,
-  FileText
+  FileText,
+  Wind,
+  AlertTriangle
 } from 'lucide-react';
 import { LineChart, Line, YAxis, ResponsiveContainer } from 'recharts';
 
-// We need to talk to the Python server running locally on port 5000 to get the mouse analysis
+// Socket connection to your Flask backend
 const socket = io('http://localhost:5000');
 
-// This keeps our real-time graph from getting too crowded and slowing things down
+// Limit points in graphs
 const GRAPH_LIMIT = 50;
+const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+const ZEN_COOLDOWN_MS = 5 * 60 * 1000; // 5 min cooldown between Zen activations
 
-// Just a quick utility to grab a random string from an array
+// Utility: random pick
 const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-// These are the scripts the AI uses to talk to the user. We split them up based on how stressed the user looks.
-// First, lines for when the user is clearly stressing out (high velocity/jitter)
+// Voice scripts
 const HIGH_STRESS_VOICE_LINES = [
   "Your cursor looks a bit tense. Unclench your jaw, let your shoulders drop and take one slow breath in, one long breath out.",
   "I'm seeing faster, less steady movements. Rest your hands on the desk for ten seconds and soften your grip on the mouse.",
   "Micro‑stress detected. Look away from the screen, roll your shoulders once or twice, then come back to your work."
 ];
 
-// Lines for when the user manages to calm down after a spike
 const RECOVERY_VOICE_LINES = [
   "Your movements look steadier again. Stay with this softer pace and notice your breathing.",
   "You're back in a calmer focus zone. This is a good time for deep, uninterrupted work.",
   "Cursor patterns are smoother now. Keep your shoulders relaxed and let your breath stay slow."
 ];
 
-// Reinforcement lines for when they are cruising along nicely in a flow state
 const CALM_FOCUS_VOICE_LINES = [
   "You’re in a stable focus window. If possible, mute one distraction and stay with your current task.",
   "Cursor movement looks calm and consistent. This is a great moment for meaningful, concentrated work.",
   "You're in a balanced state. Keep your posture comfortable, and let your breathing stay unforced."
 ];
 
-// These are the tips that appear on the dashboard card. They rotate based on context.
+// Tips
 const HIGH_STRESS_TIPS = [
   {
     title: '60‑second nervous system reset',
@@ -95,13 +97,108 @@ const CALM_TIPS = [
   }
 ];
 
-// This component is the visual heartbeat of the app. It expands and turns red when stressed, shrinks and turns green when calm.
+// -----------------------------------------------------------------------------
+// Animated number using Framer Motion
+// -----------------------------------------------------------------------------
+const AnimatedNumber = memo(function AnimatedNumber({ value, decimals = 0 }) {
+  const spring = useSpring(value, { stiffness: 120, damping: 18 });
+  const [display, setDisplay] = useState(value);
+
+  useEffect(() => {
+    spring.set(value);
+  }, [value, spring]);
+
+  useEffect(() => {
+    const unsub = spring.on('change', (v) => setDisplay(v));
+    return () => unsub();
+  }, [spring]);
+
+  return <span>{display.toFixed(decimals)}</span>;
+});
+
+// -----------------------------------------------------------------------------
+// Logo component from provided SVG
+// -----------------------------------------------------------------------------
+function NeuroLogo({ className }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 800 600"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <defs>
+        <radialGradient id="cyanGlow" cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+          <stop offset="0%" stopColor="#00ffff" stopOpacity="0.8" />
+          <stop offset="100%" stopColor="#00ffff" stopOpacity="0" />
+        </radialGradient>
+        <radialGradient id="violetGlow" cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+          <stop offset="0%" stopColor="#8000ff" stopOpacity="0.8" />
+          <stop offset="100%" stopColor="#8000ff" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+
+      {/* transparent background so it blends with the app */}
+      <rect width="800" height="600" fill="none" />
+
+      <g transform="translate(400, 300)">
+        <g fill="none" strokeWidth="2" strokeLinecap="round">
+          <g stroke="#00ffff" opacity="0.8">
+            <path
+              d="M-150,-80 C-180,-50 -180,50 -150,80 C-120,110 -50,110 -20,80 C10,50 10,-50 -20,-80 C-50,-110 -120,-110 -150,-80 Z"
+              fill="url(#cyanGlow)"
+              opacity="0.2"
+            />
+            <path d="M-140,-70 L-120,-70 L-120,-50 M-160,-40 L-130,-40 L-130,-20 M-170,0 L-140,0 M-160,40 L-130,40 L-130,60 M-140,70 L-120,70 L-120,90" />
+            <circle cx="-140" cy="-70" r="3" fill="#00ffff" />
+            <circle cx="-160" cy="-40" r="3" fill="#00ffff" />
+            <circle cx="-170" cy="0" r="3" fill="#00ffff" />
+            <circle cx="-160" cy="40" r="3" fill="#00ffff" />
+            <circle cx="-140" cy="70" r="3" fill="#00ffff" />
+            <path d="M-100,-90 L-100,-60 L-80,-60 M-70,-100 L-70,-80 M-40,-90 L-40,-60 L-20,-60 M-10,-100 L-10,-80" />
+            <circle cx="-100" cy="-90" r="3" fill="#00ffff" />
+            <circle cx="-70" cy="-100" r="3" fill="#00ffff" />
+            <circle cx="-40" cy="-90" r="3" fill="#00ffff" />
+            <circle cx="-10" cy="-100" r="3" fill="#00ffff" />
+          </g>
+          <g stroke="#8000ff" opacity="0.8">
+            <path
+              d="M150,-80 C180,-50 180,50 150,80 C120,110 50,110 20,80 C-10,50 -10,-50 20,-80 C50,-110 120,-110 150,-80 Z"
+              fill="url(#violetGlow)"
+              opacity="0.2"
+            />
+            <path d="M140,-70 L120,-70 L120,-50 M160,-40 L130,-40 L130,-20 M170,0 L140,0 M160,40 L130,40 L130,60 M140,70 L120,70 L120,90" />
+            <circle cx="140" cy="-70" r="3" fill="#8000ff" />
+            <circle cx="160" cy="-40" r="3" fill="#8000ff" />
+            <circle cx="170" cy="0" r="3" fill="#8000ff" />
+            <circle cx="160" cy="40" r="3" fill="#8000ff" />
+            <circle cx="140" cy="70" r="3" fill="#8000ff" />
+            <path d="M100,-90 L100,-60 L80,-60 M70,-100 L70,-80 M40,-90 L40,-60 L20,-60 M10,-100 L10,-80" />
+            <circle cx="100" cy="-90" r="3" fill="#8000ff" />
+            <circle cx="70" cy="-100" r="3" fill="#8000ff" />
+            <circle cx="40" cy="-90" r="3" fill="#8000ff" />
+            <circle cx="10" cy="-100" r="3" fill="#8000ff" />
+          </g>
+        </g>
+      </g>
+
+      <g transform="translate(400, 300) scale(4)">
+        <polygon
+          points="0,0 0,18 4,14 7,20 9,19 6,13 12,13"
+          fill="#ffffff"
+        />
+      </g>
+    </svg>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Existing components (NeuroOrb, SessionInsights, WellnessCoach, Privacy, Summary)
+// -----------------------------------------------------------------------------
 function NeuroOrb({ stressLevel, focusScore }) {
-  const tension = Math.max(0, 100 - focusScore); // Normalized to 0–100
-  const scale = 1 + tension / 350; // Subtle scaling, we don't want it to look too wild
+  const tension = Math.max(0, 100 - focusScore);
+  const scale = 1 + tension / 350;
   const isHigh = stressLevel === 'HIGH';
 
-  // Color logic: Rose for stress, Emerald for calm
   const ringColor = isHigh
     ? 'from-rose-400/40 to-rose-500/70'
     : 'from-emerald-300/40 to-emerald-400/70';
@@ -136,13 +233,10 @@ function NeuroOrb({ stressLevel, focusScore }) {
   );
 }
 
-// This panel shows the user the raw numbers so they know we aren't making this up
 function SessionInsights({ sessionStats, durationMs }) {
   const minutesHigh = sessionStats.highMs / 60000;
   const totalMinutes = durationMs / 60000 || 0.01;
   const avgFocus = sessionStats.samples ? sessionStats.avgFocus : 100;
-  
-  // Calculate how much of the session was spent in fight or flight mode
   const highFraction =
     durationMs > 0 ? sessionStats.highMs / durationMs : 0;
   const loadIndex = Math.round(highFraction * 100);
@@ -195,14 +289,17 @@ function SessionInsights({ sessionStats, durationMs }) {
   );
 }
 
-// This is the card that displays the context-aware tips we defined at the top
 function WellnessCoach({ card, stressLevel, focusScore }) {
   const isHigh = stressLevel === 'HIGH';
 
   return (
-    <div
+    <motion.div
+      layout
       className={`p-6 border rounded-xl bg-slate-900/80 backdrop-blur-md shadow-lg relative overflow-hidden
       ${isHigh ? 'border-rose-300/50' : 'border-emerald-300/40'}`}
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: 'easeOut' }}
     >
       <div className="flex flex-col md:flex-row gap-6 items-center justify-between relative z-10">
         <div className="flex-1 text-left">
@@ -226,8 +323,6 @@ function WellnessCoach({ card, stressLevel, focusScore }) {
             Not a medical device • For wellbeing & focus awareness only
           </p>
         </div>
-
-        {/* The breathing ring visualization */}
         <div className="flex items-center justify-center">
           {isHigh ? (
             <div className="relative w-24 h-24 rounded-full border border-rose-300/60 bg-rose-500/5 breath-ring flex items-center justify-center text-[10px] text-rose-50">
@@ -248,20 +343,23 @@ function WellnessCoach({ card, stressLevel, focusScore }) {
           )}
         </div>
       </div>
-
-      {/* Subtle background glow for atmosphere */}
       <div
         className={`absolute -right-24 -bottom-24 w-56 h-56 rounded-full blur-3xl opacity-25 pointer-events-none
         ${isHigh ? 'bg-rose-500/40' : 'bg-emerald-400/40'}`}
       />
-    </div>
+    </motion.div>
   );
 }
 
-// It's important to reassure the user that we aren't spying on them
 function PrivacyCard() {
   return (
-    <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/80 shadow-md text-left space-y-2">
+    <motion.div
+      layout
+      className="p-4 rounded-xl border border-slate-800 bg-slate-900/80 shadow-md text-left space-y-2"
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.05, duration: 0.4, ease: 'easeOut' }}
+    >
       <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-slate-400">
         <ShieldCheck size={14} className="text-sky-300" />
         <span>Privacy & digital trust</span>
@@ -274,52 +372,10 @@ function PrivacyCard() {
       <p className="text-[10px] text-slate-500">
         No accounts, no cloud sync, no raw behavioral logs stored.
       </p>
-    </div>
+    </motion.div>
   );
 }
 
-// The Panic Button (sort of). If stress gets too high, this pops up bottom-left to guide a quick 60-second reset.
-function GuidedReset({ resetRemaining, onStop }) {
-  const total = 60;
-  const progress = ((total - resetRemaining) / total) * 100;
-
-  return (
-    <div className="fixed bottom-4 left-4 z-30">
-      <div className="p-4 rounded-xl border border-emerald-300/50 bg-slate-900/95 shadow-2xl flex items-center gap-4">
-        <div className="w-16 h-16 rounded-full breath-ring flex items-center justify-center text-[10px] text-emerald-50">
-          <span className="text-center leading-tight">
-            {resetRemaining}s
-            <br />
-            reset
-          </span>
-        </div>
-        <div className="space-y-2">
-          <p className="text-xs font-medium text-emerald-200">
-            Micro‑break in progress
-          </p>
-          <p className="text-[11px] text-slate-300 max-w-xs">
-            Follow the breathing ring. Inhale as it expands, exhale as it
-            softens. Let your hands rest lightly on the desk.
-          </p>
-          <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-emerald-300 transition-all duration-400"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-          <button
-            onClick={onStop}
-            className="mt-1 text-[10px] uppercase tracking-[0.22em] text-slate-400 hover:text-slate-200"
-          >
-            Skip reset
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// This is the End-of-Session Report that shows the user how they did and provides a copy-paste summary
 function SessionSummaryModal({ open, snapshot, onClose, onNewSession }) {
   if (!open || !snapshot) return null;
 
@@ -330,7 +386,6 @@ function SessionSummaryModal({ open, snapshot, onClose, onNewSession }) {
     durationMs > 0 ? stats.highMs / durationMs : 0;
   const avgFocus = stats.samples ? stats.avgFocus : 100;
 
-  // Simple algorithm to give them a "Wellbeing Score"
   const highScore = (1 - Math.min(highFraction, 1)) * 100;
   const wellbeingScore = Math.round(0.6 * avgFocus + 0.4 * highScore);
 
@@ -374,7 +429,7 @@ Note: This is not a medical device. It reflects mouse movement patterns only, as
     try {
       await navigator.clipboard.writeText(summaryText);
       alert('Session summary copied to clipboard.');
-    } catch (e) {
+    } catch {
       alert('Unable to copy. Please select and copy manually.');
     }
   };
@@ -485,7 +540,225 @@ Note: This is not a medical device. It reflects mouse movement patterns only, as
   );
 }
 
-// Here is where we tie everything together in the main app component
+// -----------------------------------------------------------------------------
+// New: Smart Break Ring, Health Shield, Zen side widget, Strain Banner
+// -----------------------------------------------------------------------------
+const SmartBreakRing = memo(function SmartBreakRing({
+  charge, // 0–1
+  stress,
+  nextBreakSeconds
+}) {
+  const arc = clamp(charge * 100, 0, 100);
+  const ringGradient = `conic-gradient(#22c55e ${arc}%, rgba(15,23,42,1) ${arc}% 100%)`;
+  const stressLabel =
+    stress > 70 ? 'High strain' : stress > 40 ? 'Elevated' : 'Light load';
+
+  const seconds = Math.max(0, Math.round(nextBreakSeconds));
+  const min = Math.floor(seconds / 60);
+  const sec = seconds % 60;
+  const timeLabel = `${min}:${sec.toString().padStart(2, '0')}`;
+
+  return (
+    <motion.div
+      layout
+      className="relative h-56 w-full rounded-2xl border border-white/10 bg-gradient-to-br from-slate-900/70 via-slate-950 to-slate-900/90 backdrop-blur-xl shadow-[0_0_40px_rgba(15,23,42,0.9)] flex flex-col items-center justify-center gap-4 overflow-hidden"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, ease: 'easeOut' }}
+    >
+      <div className="absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_top,_rgba(52,211,153,0.18),transparent_60%)]" />
+      <div className="relative z-10 flex flex-col items-center gap-4">
+        <div
+          className="w-32 h-32 rounded-full flex items-center justify-center"
+          style={{ backgroundImage: ringGradient }}
+        >
+          <div className="w-24 h-24 rounded-full bg-slate-950 flex flex-col items-center justify-center text-center">
+            <p className="text-[9px] uppercase tracking-[0.24em] text-slate-400">
+              Smart break
+            </p>
+            <p className="text-lg font-semibold text-emerald-300">
+              <AnimatedNumber value={arc} />%
+            </p>
+            <p className="text-[10px] text-slate-400">
+              workload charge
+            </p>
+          </div>
+        </div>
+        <div className="text-center space-y-1">
+          <p className="text-xs text-slate-300">
+            Load‑adaptive Pomodoro
+          </p>
+          <p className="text-[11px] text-slate-400">
+            Next recommended reset in{' '}
+            <span className="text-emerald-300 font-medium">
+              {timeLabel}
+            </span>
+            .
+          </p>
+          <p className="text-[10px] text-slate-500">
+            Current strain:{' '}
+            <span className="text-slate-300">{stressLabel}</span>
+          </p>
+        </div>
+      </div>
+    </motion.div>
+  );
+});
+
+const HealthShield = memo(function HealthShield({ hp, stress }) {
+  const hpColor =
+    hp > 70
+      ? 'from-emerald-400 to-sky-400'
+      : hp > 40
+      ? 'from-amber-300 to-amber-500'
+      : 'from-rose-400 to-rose-500';
+
+  return (
+    <motion.div
+      layout
+      className="rounded-2xl border border-white/10 bg-gradient-to-br from-slate-900/80 via-slate-950 to-slate-900 shadow-[0_0_34px_rgba(15,23,42,0.85)] p-4 flex flex-col gap-3"
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, ease: 'easeOut' }}
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.24em] text-slate-400 flex items-center gap-2">
+            <ShieldCheck size={14} className="text-emerald-300" />
+            <span>Health shield</span>
+          </p>
+          <p className="text-xs text-slate-400">
+            Smooth, efficient movement regenerates the shield. Erratic patterns
+            chip it away.
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-slate-400">Shield integrity</p>
+          <p className="text-xl font-semibold text-slate-50">
+            <AnimatedNumber value={hp} />%
+          </p>
+        </div>
+      </div>
+
+      <div className="h-2 rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
+        <motion.div
+          className={`h-full bg-gradient-to-r ${hpColor}`}
+          style={{ width: `${clamp(hp, 0, 100)}%` }}
+          transition={{ type: 'spring', stiffness: 80, damping: 20 }}
+        />
+      </div>
+
+      <div className="flex items-center justify-between text-[10px] text-slate-400">
+        <span>Strain level</span>
+        <span>
+          <AnimatedNumber value={stress} /> / 100
+        </span>
+      </div>
+    </motion.div>
+  );
+});
+
+// Non-blocking side widget for breathing (bottom-right)
+const ZenWidget = memo(function ZenWidget({
+  active,
+  secondsLeft,
+  onClose
+}) {
+  return (
+    <AnimatePresence>
+      {active && (
+        <motion.div
+          className="fixed bottom-4 right-4 z-30"
+          initial={{ opacity: 0, x: 40, scale: 0.95 }}
+          animate={{ opacity: 1, x: 0, scale: 1 }}
+          exit={{ opacity: 0, x: 40, scale: 0.95 }}
+          transition={{ type: 'spring', stiffness: 140, damping: 16 }}
+        >
+          <div className="p-4 rounded-xl border border-emerald-300/60 bg-slate-900/95 backdrop-blur-xl shadow-2xl flex items-center gap-4 max-w-sm">
+            <motion.div
+              className="w-16 h-16 rounded-full border border-emerald-300/50 bg-emerald-400/5 flex items-center justify-center"
+              animate={{ scale: [0.9, 1.1, 0.9] }}
+              transition={{
+                duration: 8,
+                repeat: Infinity,
+                ease: 'easeInOut'
+              }}
+            >
+              <motion.div
+                className="w-11 h-11 rounded-full bg-gradient-to-br from-emerald-400/60 via-emerald-300/50 to-sky-300/60 flex flex-col items-center justify-center text-center shadow-[0_0_20px_rgba(16,185,129,0.8)]"
+                animate={{ opacity: [0.8, 1, 0.8] }}
+                transition={{
+                  duration: 8,
+                  repeat: Infinity,
+                  ease: 'easeInOut'
+                }}
+              >
+                <Wind size={18} className="mb-1 text-slate-900" />
+                <p className="text-[9px] font-medium text-slate-900">
+                  Inhale 4s
+                </p>
+                <p className="text-[9px] font-medium text-slate-900">
+                  Exhale 6s
+                </p>
+              </motion.div>
+            </motion.div>
+
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-emerald-200">
+                Guided micro‑reset
+              </p>
+              <p className="text-[11px] text-slate-300">
+                Follow the circle with your breath. This runs on the side so it
+                never blocks your work.
+              </p>
+              <p className="text-[10px] text-slate-400">
+                Remaining:{' '}
+                <span className="text-emerald-300 font-medium">
+                  {secondsLeft}s
+                </span>
+              </p>
+              <button
+                onClick={onClose}
+                className="mt-1 text-[10px] uppercase tracking-[0.22em] text-slate-400 hover:text-slate-200"
+              >
+                Skip reset
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+});
+
+const StrainBanner = memo(function StrainBanner({ visible, level }) {
+  const text =
+    level === 'HIGH'
+      ? 'High nervous system load detected. A micro‑break is recommended.'
+      : 'Elevated load — consider a short posture and breathing check.';
+
+  return (
+    <AnimatePresence>
+      {visible && (
+        <motion.div
+          layout
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -10 }}
+          transition={{ duration: 0.25, ease: 'easeOut' }}
+          className="flex items-center gap-2 rounded-xl border border-rose-400/60 bg-rose-500/10 px-4 py-2 text-xs text-rose-100 shadow-[0_0_24px_rgba(248,113,113,0.35)]"
+        >
+          <AlertTriangle size={16} className="text-rose-300" />
+          <span>{text}</span>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+});
+
+// -----------------------------------------------------------------------------
+// MAIN APP
+// -----------------------------------------------------------------------------
 function App() {
   const [metrics, setMetrics] = useState({
     velocity: 0,
@@ -501,11 +774,11 @@ function App() {
   const [wellnessCard, setWellnessCard] = useState(CALM_TIPS[0]);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
 
-  // State for the guided reset (breathing) widget
-  const [resetActive, setResetActive] = useState(false);
-  const [resetRemaining, setResetRemaining] = useState(0);
+  const [shieldHp, setShieldHp] = useState(85);
+  const [breakCharge, setBreakCharge] = useState(0);
+  const [zenActive, setZenActive] = useState(false);
+  const [zenSeconds, setZenSeconds] = useState(60);
 
-  // Accumulating stats for the entire session
   const [sessionStats, setSessionStats] = useState({
     microStressEvents: 0,
     highMs: 0,
@@ -513,11 +786,9 @@ function App() {
     avgFocus: 100
   });
 
-  // Modal visibility states
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [summarySnapshot, setSummarySnapshot] = useState(null);
 
-  // We use refs here to track state inside the Socket callback without triggering a million re-renders or stale closures
   const prevStatusRef = useRef('LOW');
   const lastVoiceTimeRef = useRef(0);
   const stateChangeTimeRef = useRef(Date.now());
@@ -526,17 +797,35 @@ function App() {
   const voiceEnabledRef = useRef(true);
   const lastMovementTimeRef = useRef(Date.now());
   const sessionStartRef = useRef(Date.now());
+  const zenActiveRef = useRef(false);
+  const zenLastTriggerRef = useRef(0);
 
   useEffect(() => {
     voiceEnabledRef.current = voiceEnabled;
   }, [voiceEnabled]);
 
-  // This text-to-Speech Handler tries to find a decent Google voice, otherwise falls back to default
+  useEffect(() => {
+    zenActiveRef.current = zenActive;
+  }, [zenActive]);
+
+  // Zen countdown
+  useEffect(() => {
+    if (!zenActive) return;
+    if (zenSeconds <= 0) {
+      setZenActive(false);
+      return;
+    }
+    const id = setTimeout(() => {
+      setZenSeconds((s) => s - 1);
+    }, 1000);
+    return () => clearTimeout(id);
+  }, [zenActive, zenSeconds]);
+
   const speak = (text) => {
     if (!voiceEnabledRef.current) return;
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
 
-    window.speechSynthesis.cancel(); // Don't queue up multiple sentences
+    window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 1.02;
@@ -551,23 +840,41 @@ function App() {
     window.speechSynthesis.speak(utterance);
   };
 
-  // Calculate Focus Score purely from jitter (0 jitter = 100% focus)
+  const triggerZen = () => {
+    const now = Date.now();
+    const idleNow = now - lastMovementTimeRef.current > 3000;
+    if (idleNow) return; // never trigger when idle
+    if (zenActiveRef.current) return;
+    if (now - zenLastTriggerRef.current < ZEN_COOLDOWN_MS) return;
+    setZenActive(true);
+    setZenSeconds(60);
+    zenLastTriggerRef.current = now;
+  };
+
+  // Focus from jitter
   const focusScore = Math.max(0, Math.min(100, 100 - metrics.jitter / 3));
+  const stressScore = Math.max(0, Math.min(100, 100 - focusScore));
 
-  // Timer logic for the guided breathing reset
+  // Approx seconds to next break based on current load
+  const approxSecondsToBreak = (() => {
+    const remaining = 1 - breakCharge;
+    const basePerSecond = 0.012;
+    const stressBoostPerSecond = (stressScore / 100) * 0.045;
+    const rate = basePerSecond + stressBoostPerSecond;
+    if (rate <= 0) return 999;
+    return remaining / rate;
+  })();
+
+  // Trigger Zen when Smart Break ring fills
   useEffect(() => {
-    if (!resetActive) return;
-    if (resetRemaining <= 0) {
-      setResetActive(false);
-      return;
+    if (breakCharge >= 0.99) {
+      setBreakCharge(0);
+      triggerZen();
     }
-    const id = setTimeout(() => {
-      setResetRemaining((r) => r - 1);
-    }, 1000);
-    return () => clearTimeout(id);
-  }, [resetActive, resetRemaining]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [breakCharge]);
 
-  // This effect is the brain of the client. It handles the data stream, updates graphs, calculates stats, and decides when the AI needs to speak up.
+  // Core socket / analytics / AI coach
   useEffect(() => {
     socket.on('connect', () => {
       setConnected(true);
@@ -580,7 +887,7 @@ function App() {
       const now = Date.now();
       setMetrics(newData);
 
-      // Update the live graphs
+      // Graph
       setGraphData((prev) => {
         const newPoint = { velocity: newData.velocity, jitter: newData.jitter };
         const updated = [...prev, newPoint];
@@ -588,27 +895,25 @@ function App() {
         return updated;
       });
 
-      // Calculate local focus score for this specific data point
       const localFocusScore = Math.max(
         0,
         Math.min(100, 100 - newData.jitter / 3)
       );
+      const localStressScore = 100 - localFocusScore;
 
-      // Check if the user is actually working or just AFK
-      const hasSignificantMovement =
-        newData.velocity > 40 || newData.jitter > 40;
-      if (hasSignificantMovement) {
+      // Track any small movement as "active"
+      if (newData.velocity > 2 || newData.jitter > 2) {
         lastMovementTimeRef.current = now;
       }
-      const idleForLong = now - lastMovementTimeRef.current > 5000; // >5s no real movement
+      const idleNow = now - lastMovementTimeRef.current > 3000; // 3s no movement = idle for coaching
 
-      // Calculate session stats time-deltas
+      // Session stats
       const prevStatus = prevStatusRef.current;
       const lastTime = lastPacketTimeRef.current;
       const dt = lastTime ? now - lastTime : 0;
+      const dtSeconds = dt / 1000;
 
       setSessionStats((prevStats) => {
-        // Count how many times we flipped from Low -> High
         const microStressEvents =
           prevStatus === 'LOW' && newData.stress_level === 'HIGH'
             ? prevStats.microStressEvents + 1
@@ -633,63 +938,75 @@ function App() {
 
       lastPacketTimeRef.current = now;
 
-      // Smart voice logic: We only speak if the user is actually moving the mouse, and we use cooldowns so we don't annoy them.
+      // Health shield dynamics
+      setShieldHp((prev) => {
+        const damageRate = (localStressScore / 100) * 26;
+        const regenRate = ((100 - localStressScore) / 100) * 18;
+        const netPerSecond = (regenRate - damageRate) / 60;
+        const newHp = clamp(prev + netPerSecond * dtSeconds, 0, 100);
+        return newHp;
+      });
+
+      // Smart Break charge (no Zen trigger here; handled in separate effect)
+      setBreakCharge((prev) => {
+        const basePerSecond = 0.012;
+        const stressBoostPerSecond = (localStressScore / 100) * 0.045;
+        const delta = (basePerSecond + stressBoostPerSecond) * dtSeconds;
+        return clamp(prev + delta, 0, 1);
+      });
+
+      // Voice logic
       const timeSinceVoice = now - lastVoiceTimeRef.current;
 
-      if (!idleForLong) {
-        if (newData.stress_level !== prevStatus) {
-          const previousStateDuration = now - stateChangeTimeRef.current;
-          stateChangeTimeRef.current = now;
+      // If idle (no movement for a while), don't speak or trigger Zen
+      if (idleNow) {
+        prevStatusRef.current = newData.stress_level;
+        return;
+      }
 
-          // Case 1: User just entered HIGH stress zone
-          if (
-            newData.stress_level === 'HIGH' &&
-            timeSinceVoice > 45_000
-          ) {
+      if (newData.stress_level !== prevStatus) {
+        const previousStateDuration = now - stateChangeTimeRef.current;
+        stateChangeTimeRef.current = now;
+
+        // Entering HIGH
+        if (
+          newData.stress_level === 'HIGH' &&
+          timeSinceVoice > 45_000
+        ) {
+          speak(pickRandom(HIGH_STRESS_VOICE_LINES));
+          lastVoiceTimeRef.current = now;
+          triggerZen();
+        }
+
+        // Coming down from sustained HIGH
+        if (
+          newData.stress_level === 'LOW' &&
+          prevStatus === 'HIGH' &&
+          previousStateDuration > 15_000 &&
+          timeSinceVoice > 45_000
+        ) {
+          speak(pickRandom(RECOVERY_VOICE_LINES));
+          lastVoiceTimeRef.current = now;
+        }
+      } else {
+        // Staying HIGH for a long time
+        if (newData.stress_level === 'HIGH') {
+          const timeInHigh = now - stateChangeTimeRef.current;
+          if (timeInHigh > 120_000 && timeSinceVoice > 90_000) {
             speak(pickRandom(HIGH_STRESS_VOICE_LINES));
             lastVoiceTimeRef.current = now;
-
-            // If it's a spike, offer the breathing exercise immediately
-            if (!resetActive) {
-              setResetActive(true);
-              setResetRemaining(60);
-            }
+            stateChangeTimeRef.current = now;
+            triggerZen();
           }
+        }
 
-          // Case 2: User just recovered (HIGH -> LOW) after a long bout of stress
-          if (
-            newData.stress_level === 'LOW' &&
-            prevStatus === 'HIGH' &&
-            previousStateDuration > 15_000 &&
-            timeSinceVoice > 45_000
-          ) {
-            speak(pickRandom(RECOVERY_VOICE_LINES));
+        // Long calm focus
+        if (newData.stress_level === 'LOW' && localFocusScore > 70) {
+          const timeInLow = now - stateChangeTimeRef.current;
+          if (timeInLow > 120_000 && timeSinceVoice > 120_000) {
+            speak(pickRandom(CALM_FOCUS_VOICE_LINES));
             lastVoiceTimeRef.current = now;
-          }
-        } else {
-          // Case 3: User has been in HIGH stress for a LONG time so we nag them gently
-          if (newData.stress_level === 'HIGH') {
-            const timeInHigh = now - stateChangeTimeRef.current;
-            if (timeInHigh > 120_000 && timeSinceVoice > 90_000) {
-              speak(pickRandom(HIGH_STRESS_VOICE_LINES));
-              lastVoiceTimeRef.current = now;
-              stateChangeTimeRef.current = now;
-
-              if (!resetActive) {
-                setResetActive(true);
-                setResetRemaining(60);
-              }
-            }
-          }
-
-          // Case 4: User has been in LOW stress or Flow State for a long time
-          if (newData.stress_level === 'LOW' && localFocusScore > 70) {
-            const timeInLow = now - stateChangeTimeRef.current;
-            if (timeInLow > 120_000 && timeSinceVoice > 120_000) {
-              speak(pickRandom(CALM_FOCUS_VOICE_LINES));
-              lastVoiceTimeRef.current = now;
-              stateChangeTimeRef.current = now;
-            }
+            stateChangeTimeRef.current = now;
           }
         }
       }
@@ -713,7 +1030,6 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Swap out the Wellness Coach card whenever the stress state flips
   useEffect(() => {
     if (metrics.stress_level === 'HIGH') {
       setWellnessCard(pickRandom(HIGH_STRESS_TIPS));
@@ -731,7 +1047,6 @@ function App() {
 
   const sessionDurationMs = Date.now() - sessionStartRef.current;
 
-  // Open the end-of-session summary
   const handleOpenSummary = () => {
     const now = Date.now();
     const durationMs = now - sessionStartRef.current;
@@ -742,7 +1057,6 @@ function App() {
     setSummaryOpen(true);
   };
 
-  // Reset everything for a fresh start
   const handleNewSession = () => {
     setSessionStats({
       microStressEvents: 0,
@@ -755,7 +1069,6 @@ function App() {
     setSummaryOpen(false);
   };
 
-  // Trigger a new calibration with the backend
   const handleRecalibrate = () => {
     setIsCalibrating(true);
     speak(
@@ -764,12 +1077,22 @@ function App() {
     socket.emit('start_calibration');
   };
 
+  const ekgStrokeColor =
+    metrics.stress_level === 'HIGH' ? '#f97373' : '#4ade80';
+
+  const showStrainBanner = metrics.stress_level !== 'LOW';
+
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-slate-950 via-slate-950 to-slate-900 text-slate-50 flex items-center justify-center px-4 py-6 selection:bg-emerald-200 selection:text-slate-900">
-      <div className="w-full max-w-6xl flex flex-col gap-6">
-        
-        {/* Main Dashboard Container */}
-        <div
+      <motion.div
+        className="w-full max-w-6xl flex flex-col gap-6"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6 }}
+      >
+        {/* MAIN DASHBOARD CARD */}
+        <motion.div
+          layout
           className={`w-full p-6 border rounded-2xl transition-all duration-500 flex flex-col gap-5 relative overflow-hidden bg-slate-900/90
             ${
               metrics.stress_level === 'HIGH'
@@ -777,37 +1100,38 @@ function App() {
                 : 'border-slate-800 shadow-[0_0_36px_rgba(15,23,42,0.9)]'
             }`}
         >
-          {/* Decorative gradient glow in the corners */}
           <div className="pointer-events-none absolute -top-32 -right-32 w-72 h-72 bg-emerald-500/10 blur-3xl rounded-full" />
           <div className="pointer-events-none absolute -bottom-40 -left-32 w-72 h-72 bg-sky-500/5 blur-3xl rounded-full" />
 
-          {/* Header Row: Title and Status */}
+          {/* Header */}
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 z-10">
             <div className="text-left space-y-2">
-              <h1 className="text-2xl md:text-3xl font-semibold tracking-[0.18em] text-white">
-                NEURO_CURSOR
-              </h1>
-              <div className="flex flex-wrap items-center gap-2 text-[10px] mt-1 opacity-80 uppercase tracking-[0.25em]">
-                <Wifi
-                  size={14}
-                  className={connected ? 'text-emerald-400' : 'text-rose-400'}
-                />
-                <span>{connected ? 'System online' : 'Signal lost'}</span>
-                <span className="mx-1">•</span>
-                <span>AI‑driven digital wellbeing monitor</span>
+              <div className="flex items-center gap-3">
+                <NeuroLogo className="w-16 h-12 md:w-20 md:h-16" />
+                <div>
+                  <p className="text-[10px] uppercase tracking-[0.3em] text-emerald-300 flex items-center gap-2">
+                    <Brain size={14} />
+                    <span>NeuroCursor</span>
+                  </p>
+                  <h1 className="text-2xl md:text-3xl font-semibold tracking-[0.18em] text-white">
+                    Preventative Digital Health Command Center
+                  </h1>
+                </div>
               </div>
-              <p className="mt-1 text-[11px] text-slate-400 max-w-md leading-relaxed">
+              <p className="mt-2 text-[11px] text-slate-400 max-w-md leading-relaxed">
                 Uses tiny changes in your mouse path as a gentle signal of
-                cognitive load and micro‑stress. Designed to support digital
-                wellbeing, focus hygiene and ergonomic awareness — not as a
-                medical device or diagnostic tool.
+                cognitive load, burnout risk and micro‑stress. Designed for
+                digital wellbeing, focus hygiene and early ergonomic awareness —
+                not as a diagnostic or medical device.
               </p>
             </div>
 
             <div className="flex flex-col items-end gap-2">
-              {/* Calibration Button: Init vs Recalibrate */}
+              {/* Calibration / Recalibration */}
               {!metrics.ai_active && (
-                <button
+                <motion.button
+                  whileHover={{ scale: 1.03, y: -1 }}
+                  whileTap={{ scale: 0.97, y: 0 }}
                   onClick={() => {
                     setIsCalibrating(true);
                     speak(
@@ -827,12 +1151,14 @@ function App() {
                   {isCalibrating
                     ? `CALIBRATING [${metrics.learning_progress}/50]`
                     : 'INITIALIZE COACH'}
-                </button>
+                </motion.button>
               )}
 
               {metrics.ai_active && (
                 <div className="flex gap-2">
-                  <button
+                  <motion.button
+                    whileHover={{ scale: 1.03, y: -1 }}
+                    whileTap={{ scale: 0.97, y: 0 }}
                     onClick={handleRecalibrate}
                     disabled={isCalibrating}
                     className={`px-4 py-2 rounded-full border text-[10px] tracking-[0.2em] uppercase transition-all duration-300 flex items-center gap-2
@@ -844,7 +1170,7 @@ function App() {
                   >
                     <Target size={14} />
                     <span>Recalibrate baseline</span>
-                  </button>
+                  </motion.button>
                   <div className="flex items-center gap-2 px-4 py-2 rounded-full border border-emerald-300/60 bg-emerald-400/10 text-emerald-200 text-[10px] tracking-[0.25em] uppercase">
                     <Brain size={16} />
                     <span>AI calibrated</span>
@@ -852,9 +1178,11 @@ function App() {
                 </div>
               )}
 
-              {/* Toggle Voice & View Summary */}
+              {/* Voice & Session report */}
               <div className="flex gap-2 mt-1">
-                <button
+                <motion.button
+                  whileHover={{ scale: 1.03, y: -1 }}
+                  whileTap={{ scale: 0.97, y: 0 }}
                   onClick={() => setVoiceEnabled((v) => !v)}
                   className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-700 bg-slate-900/60 text-[10px] tracking-[0.22em] uppercase text-slate-300 hover:border-emerald-300 hover:text-emerald-200 transition-colors"
                 >
@@ -864,17 +1192,28 @@ function App() {
                     <VolumeX size={14} className="text-slate-500" />
                   )}
                   <span>Voice coach {voiceEnabled ? 'on' : 'muted'}</span>
-                </button>
-                <button
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.03, y: -1 }}
+                  whileTap={{ scale: 0.97, y: 0 }}
                   onClick={handleOpenSummary}
                   className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-700 bg-slate-900/60 text-[10px] tracking-[0.22em] uppercase text-slate-300 hover:border-sky-300 hover:text-sky-200 transition-colors"
                 >
                   <FileText size={14} />
                   <span>Session report</span>
-                </button>
+                </motion.button>
               </div>
 
-              {/* Live State Badge */}
+              {/* Connection & state badge */}
+              <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] mt-1">
+                <Wifi
+                  size={14}
+                  className={connected ? 'text-emerald-400' : 'text-rose-400'}
+                />
+                <span className="text-slate-300">
+                  {connected ? 'System online' : 'Signal lost'}
+                </span>
+              </div>
               <div
                 className={`mt-1 px-4 py-1.5 rounded-full border text-[10px] tracking-[0.25em] uppercase transition-all duration-300 text-center
                         ${
@@ -890,7 +1229,13 @@ function App() {
             </div>
           </div>
 
-          {/* Central Visuals: The Orb, The Stats, The Privacy Info */}
+          {/* Strain banner */}
+          <StrainBanner
+            visible={showStrainBanner}
+            level={metrics.stress_level}
+          />
+
+          {/* Middle: Orb + Session snapshot + Privacy */}
           <div className="mt-3 grid md:grid-cols-3 gap-4 items-stretch">
             <div className="md:col-span-2 flex items-center justify-center">
               <NeuroOrb
@@ -907,7 +1252,7 @@ function App() {
             </div>
           </div>
 
-          {/* Focus Balance Bar visualizing jitter/stability */}
+          {/* Focus balance bar */}
           <div className="w-full flex flex-col gap-1 z-10 mt-2">
             <div className="flex justify-between text-xs font-medium tracking-[0.18em] opacity-80">
               <span
@@ -937,26 +1282,52 @@ function App() {
               />
             </div>
           </div>
-        </div>
+        </motion.div>
 
-        {/* Live Data Graphs */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Velocity Graph */}
-          <div className="p-6 border border-slate-800 rounded-xl bg-slate-900/90 backdrop-blur-md shadow-md relative overflow-hidden group">
+        {/* SMART BREAK + HEALTH SHIELD */}
+        <motion.div
+          layout
+          className="grid grid-cols-1 md:grid-cols-2 gap-6"
+        >
+          <SmartBreakRing
+            charge={breakCharge}
+            stress={stressScore}
+            nextBreakSeconds={approxSecondsToBreak}
+          />
+          <HealthShield hp={shieldHp} stress={stressScore} />
+        </motion.div>
+
+        {/* DATA GRAPHS: EKG-style velocity + jitter */}
+        <motion.div
+          layout
+          className="grid grid-cols-1 md:grid-cols-2 gap-6"
+        >
+          {/* Velocity as Bio-Rhythm EKG */}
+          <motion.div
+            layout
+            className="p-6 border border-slate-800 rounded-xl bg-slate-900/90 backdrop-blur-md shadow-md relative overflow-hidden group"
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: 'easeOut' }}
+          >
+            <div className="absolute inset-0 opacity-40">
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.12),transparent_55%),radial-gradient(circle_at_bottom,_rgba(248,113,113,0.12),transparent_55%)]" />
+              <div className="absolute inset-0 bg-[linear-gradient(rgba(15,23,42,0.8)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.8)_1px,transparent_1px)] bg-[size:20px_20px]" />
+            </div>
             <div className="flex justify-between items-start mb-4 relative z-10">
               <div>
                 <p className="text-slate-400 text-[10px] uppercase tracking-[0.22em] font-semibold mb-1">
-                  Cursor velocity
+                  Bio‑Rhythm waveform
                 </p>
                 <div className="flex items-baseline gap-2">
                   <p className="text-4xl md:text-5xl font-semibold text-white">
-                    {Math.round(metrics.velocity)}
+                    <AnimatedNumber value={metrics.velocity} decimals={0} />
                   </p>
                   <p className="text-xs text-slate-400">px/sec</p>
                 </div>
                 <p className="mt-1 text-[11px] text-slate-400">
-                  Higher spikes can signal rapid scanning, rushing or
-                  multitasking under pressure.
+                  Real‑time EKG‑style trace of cursor speed. Smooth, green
+                  waves indicate flow; jagged red segments mark micro‑stress.
                 </p>
               </div>
               <div className="p-3 bg-slate-800/80 rounded-full text-emerald-300 group-hover:bg-slate-700/80 transition-colors">
@@ -970,7 +1341,7 @@ function App() {
                   <Line
                     type="monotone"
                     dataKey="velocity"
-                    stroke="#22d3ee"
+                    stroke={ekgStrokeColor}
                     strokeWidth={2.5}
                     dot={false}
                     isAnimationActive={false}
@@ -979,16 +1350,20 @@ function App() {
               </ResponsiveContainer>
               <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 to-transparent pointer-events-none" />
             </div>
-          </div>
+          </motion.div>
 
-          {/* Jitter Graph */}
-          <div
+          {/* Jitter graph */}
+          <motion.div
+            layout
             className={`p-6 border rounded-xl bg-slate-900/90 backdrop-blur-md shadow-md relative overflow-hidden group
                 ${
                   metrics.stress_level === 'HIGH'
                     ? 'border-rose-300/60'
                     : 'border-slate-800 hover:border-rose-300/40'
                 }`}
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.05, duration: 0.5, ease: 'easeOut' }}
           >
             <div className="flex justify-between items-start mb-4 relative z-10">
               <div>
@@ -997,7 +1372,7 @@ function App() {
                 </p>
                 <div className="flex items-baseline gap-2">
                   <p className="text-4xl md:text-5xl font-semibold text-white">
-                    {Math.round(metrics.jitter)}
+                    <AnimatedNumber value={metrics.jitter} decimals={0} />
                   </p>
                   <p className="text-xs text-slate-400">index</p>
                 </div>
@@ -1026,10 +1401,10 @@ function App() {
               </ResponsiveContainer>
               <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 to-transparent pointer-events-none" />
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
 
-        {/* Wellness Coach Card */}
+        {/* Wellness coach */}
         {wellnessCard && (
           <WellnessCoach
             card={wellnessCard}
@@ -1038,22 +1413,21 @@ function App() {
           />
         )}
 
-        {/* Guided Reset Breathing Exercise */}
-        {resetActive && (
-          <GuidedReset
-            resetRemaining={resetRemaining}
-            onStop={() => setResetActive(false)}
-          />
-        )}
+        {/* Zen side widget (non-blocking breathing coach) */}
+        <ZenWidget
+          active={zenActive}
+          secondsLeft={zenSeconds}
+          onClose={() => setZenActive(false)}
+        />
 
-        {/* Session Summary Modal */}
+        {/* Session summary */}
         <SessionSummaryModal
           open={summaryOpen}
           snapshot={summarySnapshot}
           onClose={() => setSummaryOpen(false)}
           onNewSession={handleNewSession}
         />
-      </div>
+      </motion.div>
     </div>
   );
 }
