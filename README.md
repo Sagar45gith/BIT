@@ -1,4 +1,3 @@
-````markdown
 # NeuroCursor – AI-Powered Digital Phenotyping for Preventative Health
 
 NeuroCursor is an **AI‑driven preventative health tool** that reads subtle changes in your **mouse movement patterns** (digital phenotyping) to surface:
@@ -77,9 +76,6 @@ Built with **React + Tailwind + Framer Motion + Recharts**:
   - Zen breathing widget                                            |
            |                                                        |
            +--------------------- Real-time metrics ---------------+
-````
-
------
 
 ## Tech Stack
 
