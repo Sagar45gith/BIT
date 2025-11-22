@@ -2,7 +2,7 @@ import time
 import math
 import threading
 import numpy as np
-from pynput import mouse
+from pynput import mouse, keyboard # <--- Added keyboard
 
 # CONFIGURATION
 DATA_BUFFER_SIZE = 50 
@@ -16,17 +16,29 @@ class NeuroTracker:
         # Metrics
         self.current_velocity = 0.0
         self.current_jitter = 0.0 
-        
-        # THE FIX: Track last move time to auto-zero when stopped
         self.last_move_time = time.time()
+
+        # --- DEMO MODE ---
+        self.simulate_stress = False
+        self.kb_listener = keyboard.Listener(on_press=self.on_key_press)
+        self.kb_listener.start()
 
         self.listener = mouse.Listener(on_move=self.on_move)
         self.listener.start()
 
+    def on_key_press(self, key):
+        try:
+            # Press 's' to toggle Fake Stress Mode
+            if hasattr(key, 'char') and key.char == 's':
+                self.simulate_stress = not self.simulate_stress
+                print(f"🔥 SIMULATION MODE: {'ON' if self.simulate_stress else 'OFF'}")
+        except AttributeError:
+            pass
+
     def on_move(self, x, y):
         current_time = time.time()
         with self.lock:
-            self.last_move_time = current_time # Update timestamp
+            self.last_move_time = current_time
             self.data_buffer.append((x, y, current_time))
             
             if len(self.data_buffer) > DATA_BUFFER_SIZE:
@@ -43,7 +55,7 @@ class NeuroTracker:
 
         points = self.data_buffer[-ANALYSIS_WINDOW:]
         
-        # 1. Velocity
+        # Velocity
         p_new = points[-1]
         p_old = points[-2]
         dist = self.calculate_distance((p_old[0], p_old[1]), (p_new[0], p_new[1]))
@@ -52,7 +64,7 @@ class NeuroTracker:
         if time_delta > 0:
             self.current_velocity = dist / time_delta
 
-        # 2. Tortuosity (Jitter)
+        # Tortuosity (Jitter)
         path_length = 0
         for i in range(1, len(points)):
             path_length += self.calculate_distance(
@@ -68,7 +80,6 @@ class NeuroTracker:
         )
 
         if displacement < 5:
-             # If moving very little but path is long = Tremor
             if path_length > 15: 
                 self.current_jitter = 100.0 
             else:
@@ -80,7 +91,15 @@ class NeuroTracker:
 
     def get_latest_stats(self):
         with self.lock:
-            # THE FIX: If mouse hasn't moved in 0.15s, FORCE ZERO
+            # --- DEMO CHEAT CODE ---
+            if self.simulate_stress:
+                return {
+                    "velocity": np.random.uniform(800, 1200), # Fake high speed
+                    "jitter": np.random.uniform(200, 400),    # Fake high tremor
+                    "timestamp": time.time()
+                }
+
+            # Normal Logic
             if time.time() - self.last_move_time > 0.15:
                 self.current_velocity = 0.0
                 self.current_jitter = 0.0
